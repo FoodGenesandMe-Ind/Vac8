@@ -5,11 +5,14 @@ Local AI vacation planner with Agatha (side chat), working plan, suggestions, an
 ## Setup
 
 ```bash
-pnpm install
+npm install
 cp .env.example .env
 # Add ANTHROPIC_API_KEY or OPENAI_API_KEY, and SERPER_API_KEY for search
-pnpm dev
+npm run test:keys   # verify all keys
+npm run dev
 ```
+
+Uses `npm` (not `pnpm`). Install pnpm only if you prefer it: `npm install -g pnpm`.
 
 Open http://localhost:5173
 
