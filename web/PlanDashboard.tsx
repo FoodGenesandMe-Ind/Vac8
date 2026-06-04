@@ -1,3 +1,4 @@
+import { useCallback, useState } from "react";
 import type { VacationPlan } from "./types";
 import {
   demoteSuggestion,
@@ -5,7 +6,10 @@ import {
   reorderSuggestions,
   reorderWorkingPlan,
 } from "./vac8-api";
-import { DraggableCard } from "./DraggableCard";
+import { DropGap } from "./DropGap";
+import { PlanCard } from "./PlanCard";
+import type { DragPayload, DropTarget, PlanZone } from "./dnd-types";
+import { reorderList } from "./dnd-types";
 
 type Props = {
   plan: VacationPlan | null;
@@ -17,14 +21,15 @@ function formatUsd(n?: number) {
   return `$${n.toLocaleString()}`;
 }
 
-function reorderList<T>(items: T[], from: number, to: number): T[] {
-  const next = [...items];
-  const [moved] = next.splice(from, 1);
-  next.splice(to, 0, moved);
-  return next;
-}
-
 export function PlanDashboard({ plan, onPromote }: Props) {
+  const [dragPayload, setDragPayload] = useState<DragPayload | null>(null);
+  const [dropTarget, setDropTarget] = useState<DropTarget | null>(null);
+
+  const clearDnD = useCallback(() => {
+    setDragPayload(null);
+    setDropTarget(null);
+  }, []);
+
   if (!plan) {
     return (
       <main className="flex-1 flex items-center justify-center text-muted text-sm p-8 text-center">
@@ -45,23 +50,101 @@ export function PlanDashboard({ plan, onPromote }: Props) {
     onPromote(updated);
   };
 
-  const handleReorderWorking = async (from: number, to: number) => {
-    const reordered = reorderList(plan.workingPlan, from, to);
-    const updated = await reorderWorkingPlan(
-      plan.id,
-      reordered.map((i) => i.id)
-    );
-    onPromote(updated);
+  const handleDragOverGap = (zone: PlanZone, index: number) => {
+    setDropTarget({ zone, index });
   };
 
-  const handleReorderSuggestions = async (from: number, to: number) => {
-    const reordered = reorderList(activeSuggestions, from, to);
-    const updated = await reorderSuggestions(
-      plan.id,
-      reordered.map((s) => s.id)
-    );
-    onPromote(updated);
+  const handleDragOverCard = (
+    zone: PlanZone,
+    index: number,
+    clientY: number,
+    rect: DOMRect
+  ) => {
+    const mid = rect.top + rect.height / 2;
+    const insertIndex = clientY < mid ? index : index + 1;
+    setDropTarget({ zone, index: insertIndex });
   };
+
+  const insertPromotedAt = async (suggestionId: string, toIndex: number) => {
+    let updated = await promoteSuggestion(plan.id, suggestionId);
+    const fromIdx = updated.workingPlan.findIndex((w) => w.id === suggestionId);
+    if (fromIdx >= 0 && fromIdx !== toIndex) {
+      const reordered = reorderList(updated.workingPlan, fromIdx, toIndex);
+      updated = await reorderWorkingPlan(
+        plan.id,
+        reordered.map((i) => i.id)
+      );
+    }
+    onPromote(updated);
+    clearDnD();
+  };
+
+  const insertDemotedAt = async (itemId: string, toIndex: number) => {
+    let updated = await demoteSuggestion(plan.id, itemId);
+    const active = updated.suggestions.filter((s) => !s.promoted);
+    const fromIdx = active.findIndex((s) => s.id === itemId);
+    if (fromIdx >= 0 && fromIdx !== toIndex) {
+      const reordered = reorderList(active, fromIdx, toIndex);
+      updated = await reorderSuggestions(
+        plan.id,
+        reordered.map((s) => s.id)
+      );
+    }
+    onPromote(updated);
+    clearDnD();
+  };
+
+  const handleDrop = async (targetZone: PlanZone, targetIndex: number) => {
+    if (!dragPayload) return;
+
+    const { zone: sourceZone, index: sourceIndex, itemId } = dragPayload;
+
+    try {
+      if (sourceZone === targetZone) {
+        if (sourceZone === "working") {
+          let to = targetIndex;
+          if (to > sourceIndex) to -= 1;
+          if (to === sourceIndex) return;
+          const reordered = reorderList(plan.workingPlan, sourceIndex, to);
+          const updated = await reorderWorkingPlan(
+            plan.id,
+            reordered.map((i) => i.id)
+          );
+          onPromote(updated);
+        } else {
+          let to = targetIndex;
+          if (to > sourceIndex) to -= 1;
+          if (to === sourceIndex) return;
+          const reordered = reorderList(activeSuggestions, sourceIndex, to);
+          const updated = await reorderSuggestions(
+            plan.id,
+            reordered.map((s) => s.id)
+          );
+          onPromote(updated);
+        }
+        clearDnD();
+        return;
+      }
+
+      if (sourceZone === "suggestions" && targetZone === "working") {
+        await insertPromotedAt(itemId, targetIndex);
+        return;
+      }
+
+      if (sourceZone === "working" && targetZone === "suggestions") {
+        await insertDemotedAt(itemId, targetIndex);
+        return;
+      }
+    } catch (e) {
+      console.error(e);
+      clearDnD();
+    }
+  };
+
+  const workingHighlight =
+    dragPayload?.zone === "suggestions" ? "ring-1 ring-accent/30 rounded-lg p-1 -m-1" : "";
+  const suggestionsHighlight =
+    dragPayload?.zone === "working" ? "ring-1 ring-accent/30 rounded-lg p-1 -m-1" : "";
 
   return (
     <main className="flex-1 flex flex-col min-w-0 border-r border-border">
@@ -79,29 +162,41 @@ export function PlanDashboard({ plan, onPromote }: Props) {
           </span>
         </div>
         <p className="text-xs text-muted mt-2">
-          Cards are numbered per section. Tell Agatha e.g. &quot;Promote #2&quot; (Suggestions) or &quot;Demote W#1&quot; (Working plan).
+          Drag cards between sections to promote/demote, or use # / W# with Agatha.
         </p>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
-        <section>
+        <section className={workingHighlight}>
           <h2 className="text-xs uppercase tracking-wide text-muted mb-2">Working plan</h2>
-          {plan.workingPlan.length === 0 ? (
-            <p className="text-sm text-muted">Promote suggestions below to build your itinerary.</p>
-          ) : (
-            <ul className="space-y-2">
-              {plan.workingPlan.map((item, index) => (
-                <DraggableCard
-                  key={item.id}
+          <ul className="space-y-0" onDragLeave={() => setDropTarget(null)}>
+            <DropGap
+              zone="working"
+              index={0}
+              dropTarget={dropTarget}
+              onDragOver={handleDragOverGap}
+              onDrop={handleDrop}
+              large={plan.workingPlan.length === 0}
+            />
+            {plan.workingPlan.map((item, index) => (
+              <div key={item.id}>
+                <PlanCard
+                  zone="working"
                   displayNum={index + 1}
                   index={index}
-                  onReorder={handleReorderWorking}
+                  itemId={item.id}
+                  dragPayload={dragPayload}
+                  dropTarget={dropTarget}
+                  onDragStart={setDragPayload}
+                  onDragEnd={clearDnD}
+                  onDragOverCard={handleDragOverCard}
                 >
                   <div className="flex justify-between items-start gap-2">
                     <div className="min-w-0">
-                      <span className="text-[10px] text-muted uppercase mr-1">W#</span>
                       <span className="font-medium">{item.title}</span>
-                      <span className="text-muted shrink-0 ml-2">{formatUsd(item.estimatedUsd)}</span>
+                      <span className="text-muted shrink-0 ml-2">
+                        {formatUsd(item.estimatedUsd)}
+                      </span>
                     </div>
                     <button
                       type="button"
@@ -117,10 +212,17 @@ export function PlanDashboard({ plan, onPromote }: Props) {
                   {item.location && (
                     <p className="text-xs text-muted mt-0.5">{item.location}</p>
                   )}
-                </DraggableCard>
-              ))}
-            </ul>
-          )}
+                </PlanCard>
+                <DropGap
+                  zone="working"
+                  index={index + 1}
+                  dropTarget={dropTarget}
+                  onDragOver={handleDragOverGap}
+                  onDrop={handleDrop}
+                />
+              </div>
+            ))}
+          </ul>
         </section>
 
         {plan.priceWatches.length > 0 && (
@@ -134,66 +236,79 @@ export function PlanDashboard({ plan, onPromote }: Props) {
                 >
                   <span className="text-accent font-semibold mr-2">#{index + 1}</span>
                   <span className="font-medium">{w.label}</span>
-                  <div className="text-muted mt-1">
-                    {w.recommendation === "buy_now" && (
-                      <span className="text-green-400">Buy now</span>
-                    )}
-                    {w.recommendation === "wait" && (
-                      <span className="text-amber-400">Wait</span>
-                    )}
-                    {w.recommendation === "neutral" && "Stable"}
-                    {w.changePercent != null && ` (${w.changePercent.toFixed(1)}%)`}
-                    {w.lastCheckedAt && ` · checked ${new Date(w.lastCheckedAt).toLocaleString()}`}
-                  </div>
-                  {w.googleFlightsUrl && (
-                    <a
-                      href={w.googleFlightsUrl}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-accent hover:underline mt-1 inline-block"
-                    >
-                      Google Flights
-                    </a>
-                  )}
                 </li>
               ))}
             </ul>
           </section>
         )}
 
-        <section>
+        <section className={suggestionsHighlight}>
           <h2 className="text-xs uppercase tracking-wide text-muted mb-2">Suggestions</h2>
           {activeSuggestions.length === 0 ? (
-            <p className="text-sm text-muted">Agatha will add suggestions as you chat.</p>
+            dragPayload?.zone === "working" ? (
+              <ul className="space-y-0">
+                <DropGap
+                  zone="suggestions"
+                  index={0}
+                  dropTarget={dropTarget}
+                  onDragOver={handleDragOverGap}
+                  onDrop={handleDrop}
+                  large
+                />
+              </ul>
+            ) : (
+              <p className="text-sm text-muted">Agatha will add suggestions as you chat.</p>
+            )
           ) : (
-            <ul className="space-y-2">
+            <ul className="space-y-0">
+              <DropGap
+                zone="suggestions"
+                index={0}
+                dropTarget={dropTarget}
+                onDragOver={handleDragOverGap}
+                onDrop={handleDrop}
+              />
               {activeSuggestions.map((s, index) => (
-                <DraggableCard
-                  key={s.id}
-                  displayNum={index + 1}
-                  index={index}
-                  onReorder={handleReorderSuggestions}
-                >
-                  <div className="flex justify-between items-start gap-2">
-                    <div>
-                      <span className="font-medium">{s.title}</span>
-                      <span className="ml-2 text-xs text-muted uppercase">{s.type}</span>
-                      {s.description && (
-                        <p className="text-muted mt-1 text-xs">{s.description}</p>
-                      )}
+                <div key={s.id}>
+                  <PlanCard
+                    zone="suggestions"
+                    displayNum={index + 1}
+                    index={index}
+                    itemId={s.id}
+                    dragPayload={dragPayload}
+                    dropTarget={dropTarget}
+                    onDragStart={setDragPayload}
+                    onDragEnd={clearDnD}
+                    onDragOverCard={handleDragOverCard}
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <div>
+                        <span className="font-medium">{s.title}</span>
+                        <span className="ml-2 text-xs text-muted uppercase">{s.type}</span>
+                        {s.description && (
+                          <p className="text-muted mt-1 text-xs">{s.description}</p>
+                        )}
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => handlePromote(s.id)}
+                        className="shrink-0 px-2 py-1 text-xs rounded bg-accent/20 text-accent hover:bg-accent/30"
+                      >
+                        Promote
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => handlePromote(s.id)}
-                      className="shrink-0 px-2 py-1 text-xs rounded bg-accent/20 text-accent hover:bg-accent/30"
-                    >
-                      Promote
-                    </button>
-                  </div>
-                  {s.estimatedUsd != null && (
-                    <p className="text-xs text-muted mt-1">~{formatUsd(s.estimatedUsd)}</p>
-                  )}
-                </DraggableCard>
+                    {s.estimatedUsd != null && (
+                      <p className="text-xs text-muted mt-1">~{formatUsd(s.estimatedUsd)}</p>
+                    )}
+                  </PlanCard>
+                  <DropGap
+                    zone="suggestions"
+                    index={index + 1}
+                    dropTarget={dropTarget}
+                    onDragOver={handleDragOverGap}
+                    onDrop={handleDrop}
+                  />
+                </div>
               ))}
             </ul>
           )}
@@ -201,7 +316,7 @@ export function PlanDashboard({ plan, onPromote }: Props) {
       </div>
 
       <footer className="p-2 border-t border-border text-xs text-muted">
-        Drag the grip to reorder. Estimates are indicative, not live bookable fares.
+        Drag suggestions into Working plan to promote. Drag working items down to demote.
       </footer>
     </main>
   );
