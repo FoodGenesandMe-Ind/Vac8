@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { VacationPlan } from "../schema/plan";
+import type { VacationPlan } from "./types";
 import { fetchMessages, streamChat, type ChatMessage } from "./api";
 
 type Props = {
@@ -7,7 +7,6 @@ type Props = {
   plan: VacationPlan | null;
   onPlanUpdate: (plan: VacationPlan) => void;
   onEnsureVacation: () => Promise<string>;
-  onVacationCreated: () => Promise<VacationPlan[]>;
 };
 
 export function AgathaPanel({

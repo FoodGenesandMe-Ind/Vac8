@@ -1,10 +1,18 @@
-import type { VacationPlan } from "../schema/plan";
+import type { VacationPlan } from "./types";
 
 const BASE = "/api";
 
+async function parseJson<T>(res: Response): Promise<T> {
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(`API ${res.status}: ${text.slice(0, 200) || res.statusText}`);
+  }
+  return res.json() as Promise<T>;
+}
+
 export async function fetchVacations(): Promise<VacationPlan[]> {
   const res = await fetch(`${BASE}/vacations`);
-  return res.json();
+  return parseJson(res);
 }
 
 export async function createVacation(title?: string): Promise<VacationPlan> {
@@ -13,12 +21,12 @@ export async function createVacation(title?: string): Promise<VacationPlan> {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title: title ?? "New Vac8" }),
   });
-  return res.json();
+  return parseJson(res);
 }
 
 export async function fetchVacation(id: string): Promise<VacationPlan> {
   const res = await fetch(`${BASE}/vacations/${id}`);
-  return res.json();
+  return parseJson(res);
 }
 
 export async function promoteSuggestion(
@@ -30,14 +38,14 @@ export async function promoteSuggestion(
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ suggestionId }),
   });
-  return res.json();
+  return parseJson(res);
 }
 
 export type ChatMessage = { id: string; role: string; content: string; createdAt: string };
 
 export async function fetchMessages(vacationId: string): Promise<ChatMessage[]> {
   const res = await fetch(`${BASE}/vacations/${vacationId}/messages`);
-  return res.json();
+  return parseJson(res);
 }
 
 export function streamChat(
@@ -97,6 +105,9 @@ export function streamChat(
         }
       }
     }
+    handlers.onDone?.();
+  }).catch((e) => {
+    handlers.onError?.(e instanceof Error ? e.message : String(e));
     handlers.onDone?.();
   });
 

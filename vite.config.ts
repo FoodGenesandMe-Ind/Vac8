@@ -5,6 +5,7 @@ import path from "path";
 export default defineConfig({
   plugins: [react()],
   root: "web",
+  publicDir: "public",
   resolve: {
     alias: {
       "@schema": path.resolve(__dirname, "schema"),

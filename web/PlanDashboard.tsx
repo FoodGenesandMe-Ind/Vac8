@@ -1,4 +1,4 @@
-import type { VacationPlan } from "../schema/plan";
+import type { VacationPlan } from "./types";
 import { promoteSuggestion } from "./api";
 
 type Props = {

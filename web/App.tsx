@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import type { VacationPlan } from "../schema/plan";
+import type { VacationPlan } from "./types";
 import {
   createVacation,
   fetchVacation,
@@ -14,10 +14,12 @@ export default function App() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [plan, setPlan] = useState<VacationPlan | null>(null);
   const [loading, setLoading] = useState(true);
+  const [apiError, setApiError] = useState<string | null>(null);
 
   const refreshList = useCallback(async () => {
     const list = await fetchVacations();
     setVacations(list);
+    setApiError(null);
     return list;
   }, []);
 
@@ -28,7 +30,9 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    refreshList().finally(() => setLoading(false));
+    refreshList()
+      .catch((e) => setApiError(e instanceof Error ? e.message : String(e)))
+      .finally(() => setLoading(false));
   }, [refreshList]);
 
   useEffect(() => {
@@ -68,7 +72,13 @@ export default function App() {
   }
 
   return (
-    <div className="h-screen flex bg-panel text-gray-200 overflow-hidden">
+    <div className="h-screen flex flex-col bg-panel text-gray-200 overflow-hidden">
+      {apiError && (
+        <div className="shrink-0 px-4 py-2 bg-red-900/40 border-b border-red-700 text-sm text-red-200">
+          API not reachable: {apiError}. Run <code className="text-red-100">pnpm dev</code> (needs both web and api).
+        </div>
+      )}
+      <div className="flex flex-1 min-h-0 overflow-hidden">
       <VacationList
         vacations={vacations}
         selectedId={selectedId}
@@ -81,8 +91,8 @@ export default function App() {
         plan={plan}
         onPlanUpdate={handlePlanUpdate}
         onEnsureVacation={ensureVacation}
-        onVacationCreated={refreshList}
       />
+      </div>
     </div>
   );
 }
