@@ -4,7 +4,7 @@ import {
   createVacation,
   fetchVacation,
   fetchVacations,
-} from "./api";
+} from "./vac8-api";
 import { VacationList } from "./VacationList";
 import { PlanDashboard } from "./PlanDashboard";
 import { AgathaPanel } from "./AgathaPanel";

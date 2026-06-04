@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { VacationPlan } from "./types";
-import { fetchMessages, streamChat, type ChatMessage } from "./api";
+import { fetchMessages, streamChat, type ChatMessage } from "./vac8-api";
 
 type Props = {
   vacationId: string | null;

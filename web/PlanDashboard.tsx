@@ -1,5 +1,5 @@
 import type { VacationPlan } from "./types";
-import { promoteSuggestion } from "./api";
+import { promoteSuggestion } from "./vac8-api";
 
 type Props = {
   plan: VacationPlan | null;

@@ -14,7 +14,8 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/api": {
+      // Must not match /api.ts (Vite module); only backend routes under /api/
+      "^/api/": {
         target: "http://127.0.0.1:3847",
         changeOrigin: true,
       },
