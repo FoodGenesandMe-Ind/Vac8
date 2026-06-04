@@ -9,9 +9,13 @@ Tools:
 - Price watches: add_price_watch, update_price_watch, remove_price_watch
 - Optional: read_plan_from_db, verify_plan (auto-verify already runs on mutations)
 
-When the user asks to demote: call demote_suggestion with suggestionId (same as working plan item id).
-When the user asks to promote: call promote_suggestion.
-When the user asks to update/edit: call update_suggestion with suggestionId and updates.
+Card numbers (use displayNum in tools):
+- Suggestions: #1, #2, ... (e.g. "Promote #4" -> promote_suggestion with displayNum 4, section suggestions)
+- Working plan: W#1, W#2, ... (e.g. "Demote W#1" -> demote_suggestion with displayNum 1, section working)
+
+When the user says #n without prefix, assume Suggestions. When they say W#n, use section working.
+
+Reorder: reorder_working_plan or reorder_suggestions with orderedIds.
 
 Never claim a change is complete unless the tool result includes [verified in database].
 

@@ -1,5 +1,11 @@
 import type { VacationPlan } from "./types";
-import { demoteSuggestion, promoteSuggestion } from "./vac8-api";
+import {
+  demoteSuggestion,
+  promoteSuggestion,
+  reorderSuggestions,
+  reorderWorkingPlan,
+} from "./vac8-api";
+import { DraggableCard } from "./DraggableCard";
 
 type Props = {
   plan: VacationPlan | null;
@@ -9,6 +15,13 @@ type Props = {
 function formatUsd(n?: number) {
   if (n == null) return "—";
   return `$${n.toLocaleString()}`;
+}
+
+function reorderList<T>(items: T[], from: number, to: number): T[] {
+  const next = [...items];
+  const [moved] = next.splice(from, 1);
+  next.splice(to, 0, moved);
+  return next;
 }
 
 export function PlanDashboard({ plan, onPromote }: Props) {
@@ -32,6 +45,24 @@ export function PlanDashboard({ plan, onPromote }: Props) {
     onPromote(updated);
   };
 
+  const handleReorderWorking = async (from: number, to: number) => {
+    const reordered = reorderList(plan.workingPlan, from, to);
+    const updated = await reorderWorkingPlan(
+      plan.id,
+      reordered.map((i) => i.id)
+    );
+    onPromote(updated);
+  };
+
+  const handleReorderSuggestions = async (from: number, to: number) => {
+    const reordered = reorderList(activeSuggestions, from, to);
+    const updated = await reorderSuggestions(
+      plan.id,
+      reordered.map((s) => s.id)
+    );
+    onPromote(updated);
+  };
+
   return (
     <main className="flex-1 flex flex-col min-w-0 border-r border-border">
       <header className="p-4 border-b border-border">
@@ -47,6 +78,9 @@ export function PlanDashboard({ plan, onPromote }: Props) {
             range {formatUsd(plan.totals.low)} – {formatUsd(plan.totals.high)}
           </span>
         </div>
+        <p className="text-xs text-muted mt-2">
+          Cards are numbered per section. Tell Agatha e.g. &quot;Promote #2&quot; (Suggestions) or &quot;Demote W#1&quot; (Working plan).
+        </p>
       </header>
 
       <div className="flex-1 overflow-y-auto p-4 space-y-6">
@@ -56,13 +90,16 @@ export function PlanDashboard({ plan, onPromote }: Props) {
             <p className="text-sm text-muted">Promote suggestions below to build your itinerary.</p>
           ) : (
             <ul className="space-y-2">
-              {plan.workingPlan.map((item) => (
-                <li
+              {plan.workingPlan.map((item, index) => (
+                <DraggableCard
                   key={item.id}
-                  className="p-3 rounded bg-surface border border-border text-sm"
+                  displayNum={index + 1}
+                  index={index}
+                  onReorder={handleReorderWorking}
                 >
                   <div className="flex justify-between items-start gap-2">
                     <div className="min-w-0">
+                      <span className="text-[10px] text-muted uppercase mr-1">W#</span>
                       <span className="font-medium">{item.title}</span>
                       <span className="text-muted shrink-0 ml-2">{formatUsd(item.estimatedUsd)}</span>
                     </div>
@@ -80,7 +117,7 @@ export function PlanDashboard({ plan, onPromote }: Props) {
                   {item.location && (
                     <p className="text-xs text-muted mt-0.5">{item.location}</p>
                   )}
-                </li>
+                </DraggableCard>
               ))}
             </ul>
           )}
@@ -90,12 +127,13 @@ export function PlanDashboard({ plan, onPromote }: Props) {
           <section>
             <h2 className="text-xs uppercase tracking-wide text-muted mb-2">Price watches</h2>
             <ul className="space-y-2">
-              {plan.priceWatches.map((w) => (
+              {plan.priceWatches.map((w, index) => (
                 <li
                   key={w.id}
                   className="p-2 rounded bg-surface border border-border text-xs"
                 >
-                  <div className="font-medium">{w.label}</div>
+                  <span className="text-accent font-semibold mr-2">#{index + 1}</span>
+                  <span className="font-medium">{w.label}</span>
                   <div className="text-muted mt-1">
                     {w.recommendation === "buy_now" && (
                       <span className="text-green-400">Buy now</span>
@@ -129,10 +167,12 @@ export function PlanDashboard({ plan, onPromote }: Props) {
             <p className="text-sm text-muted">Agatha will add suggestions as you chat.</p>
           ) : (
             <ul className="space-y-2">
-              {activeSuggestions.map((s) => (
-                <li
+              {activeSuggestions.map((s, index) => (
+                <DraggableCard
                   key={s.id}
-                  className="p-3 rounded bg-surface border border-border text-sm"
+                  displayNum={index + 1}
+                  index={index}
+                  onReorder={handleReorderSuggestions}
                 >
                   <div className="flex justify-between items-start gap-2">
                     <div>
@@ -153,7 +193,7 @@ export function PlanDashboard({ plan, onPromote }: Props) {
                   {s.estimatedUsd != null && (
                     <p className="text-xs text-muted mt-1">~{formatUsd(s.estimatedUsd)}</p>
                   )}
-                </li>
+                </DraggableCard>
               ))}
             </ul>
           )}
@@ -161,7 +201,7 @@ export function PlanDashboard({ plan, onPromote }: Props) {
       </div>
 
       <footer className="p-2 border-t border-border text-xs text-muted">
-        Estimates are indicative from web search, not live bookable fares.
+        Drag the grip to reorder. Estimates are indicative, not live bookable fares.
       </footer>
     </main>
   );

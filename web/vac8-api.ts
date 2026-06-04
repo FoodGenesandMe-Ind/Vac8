@@ -53,6 +53,30 @@ export async function demoteSuggestion(
   return parseJson(res);
 }
 
+export async function reorderWorkingPlan(
+  vacationId: string,
+  orderedIds: string[]
+): Promise<VacationPlan> {
+  const res = await fetch(`${BASE}/vacations/${vacationId}/reorder/working`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderedIds }),
+  });
+  return parseJson(res);
+}
+
+export async function reorderSuggestions(
+  vacationId: string,
+  orderedIds: string[]
+): Promise<VacationPlan> {
+  const res = await fetch(`${BASE}/vacations/${vacationId}/reorder/suggestions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ orderedIds }),
+  });
+  return parseJson(res);
+}
+
 export type ChatMessage = { id: string; role: string; content: string; createdAt: string };
 
 export async function fetchMessages(vacationId: string): Promise<ChatMessage[]> {

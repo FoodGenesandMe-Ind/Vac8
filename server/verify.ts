@@ -32,6 +32,8 @@ export const MUTATION_TOOLS = new Set([
   "add_price_watch",
   "update_price_watch",
   "remove_price_watch",
+  "reorder_working_plan",
+  "reorder_suggestions",
 ]);
 
 export function runVerification(vacationId: string, checks: PlanCheck[]): VerificationResult {

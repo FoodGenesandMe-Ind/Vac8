@@ -11,6 +11,46 @@ import {
   verifyAddedSuggestions,
   type PlanCheck,
 } from "./verify.js";
+import {
+  resolveItemId,
+  reorderWorkingPlan,
+  reorderUnpromotedSuggestions,
+  type PlanSection,
+} from "./plan-numbers.js";
+
+const CARD_REF_PROPS = {
+  suggestionId: { type: "string", description: "UUID from plan state" },
+  displayNum: {
+    type: "number",
+    description: "Card number from UI: #n in Suggestions, W#n in Working plan (1-based)",
+  },
+  section: { type: "string", enum: ["working", "suggestions"] },
+};
+
+function resolveSuggestionId(
+  plan: VacationPlan,
+  input: Record<string, unknown>
+): string | null {
+  if (input.suggestionId) return String(input.suggestionId);
+  if (input.displayNum != null) {
+    const section = (input.section as PlanSection) ?? "suggestions";
+    return resolveItemId(plan, section, Number(input.displayNum));
+  }
+  return null;
+}
+
+function resolveWorkingItemId(
+  plan: VacationPlan,
+  input: Record<string, unknown>
+): string | null {
+  if (input.itemId) return String(input.itemId);
+  if (input.suggestionId) return String(input.suggestionId);
+  if (input.displayNum != null) {
+    const section = (input.section as PlanSection) ?? "working";
+    return resolveItemId(plan, section, Number(input.displayNum));
+  }
+  return null;
+}
 
 export type ToolOutput = {
   result: string;
@@ -157,42 +197,61 @@ export const TOOL_DEFINITIONS = [
   {
     name: "update_suggestion",
     description:
-      "Edit an existing suggestion by id (title, description, airline details, costs, etc.). Works for promoted and unpromoted cards; keeps working plan in sync if promoted.",
+      "Edit a suggestion card. Use suggestionId OR displayNum (Suggestions #n, or working W#n via section).",
     input_schema: {
       type: "object" as const,
       properties: {
-        suggestionId: { type: "string", description: "Suggestion id from plan state" },
+        ...CARD_REF_PROPS,
         updates: { type: "object", properties: { ...ITEM_UPDATE_PROPERTIES } },
       },
-      required: ["suggestionId", "updates"],
+      required: ["updates"],
     },
   },
   {
     name: "remove_suggestion",
-    description: "Delete a suggestion card by id. Also removes it from the working plan if promoted.",
+    description: "Delete a suggestion card by id or displayNum (#n in Suggestions).",
     input_schema: {
       type: "object" as const,
-      properties: { suggestionId: { type: "string" } },
-      required: ["suggestionId"],
+      properties: { ...CARD_REF_PROPS },
     },
   },
   {
     name: "promote_suggestion",
-    description: "Promote a suggestion into the working plan (Suggestions -> Working plan).",
+    description: "Promote Suggestions card #n into the working plan. Use displayNum (e.g. 4 for #4) or suggestionId.",
     input_schema: {
       type: "object" as const,
-      properties: { suggestionId: { type: "string" } },
-      required: ["suggestionId"],
+      properties: { ...CARD_REF_PROPS },
     },
   },
   {
     name: "demote_suggestion",
     description:
-      "Demote a suggestion from the working plan back to Suggestions (unpromoted). Use suggestionId (same as item id).",
+      "Demote working plan card W#n back to Suggestions. Use displayNum with section working, or suggestionId.",
     input_schema: {
       type: "object" as const,
-      properties: { suggestionId: { type: "string" } },
-      required: ["suggestionId"],
+      properties: { ...CARD_REF_PROPS, itemId: { type: "string" } },
+    },
+  },
+  {
+    name: "reorder_working_plan",
+    description: "Reorder working plan cards. Pass orderedIds in the desired order (W#1 first, etc.).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        orderedIds: { type: "array", items: { type: "string" } },
+      },
+      required: ["orderedIds"],
+    },
+  },
+  {
+    name: "reorder_suggestions",
+    description: "Reorder unpromoted suggestion cards. Pass orderedIds (#1 first, etc.).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        orderedIds: { type: "array", items: { type: "string" } },
+      },
+      required: ["orderedIds"],
     },
   },
   {
@@ -238,14 +297,16 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "update_working_plan_item",
-    description: "Edit an item already in the working plan by id.",
+    description: "Edit a working plan card. Use itemId OR displayNum with section working (W#n).",
     input_schema: {
       type: "object" as const,
       properties: {
         itemId: { type: "string" },
+        displayNum: CARD_REF_PROPS.displayNum,
+        section: CARD_REF_PROPS.section,
         updates: { type: "object", properties: { ...ITEM_UPDATE_PROPERTIES } },
       },
-      required: ["itemId", "updates"],
+      required: ["updates"],
     },
   },
   {
@@ -372,7 +433,8 @@ async function executeTool(
     }
 
     case "update_suggestion": {
-      const sid = String(input.suggestionId);
+      const sid = resolveSuggestionId(plan, input);
+      if (!sid) return { result: "Suggestion not found: provide suggestionId or displayNum (#n)." };
       const updates = (input.updates as Record<string, unknown>) ?? {};
       const exists = plan.suggestions.some((s) => s.id === sid);
       if (!exists) return { result: `Suggestion not found: ${sid}` };
@@ -382,7 +444,8 @@ async function executeTool(
     }
 
     case "remove_suggestion": {
-      const sid = String(input.suggestionId);
+      const sid = resolveSuggestionId(plan, input);
+      if (!sid) return { result: "Suggestion not found: provide suggestionId or displayNum." };
       const sug = plan.suggestions.find((s) => s.id === sid);
       if (!sug) return { result: `Suggestion not found: ${sid}` };
       plan = saveVacation(
@@ -405,7 +468,8 @@ async function executeTool(
     }
 
     case "promote_suggestion": {
-      const sid = String(input.suggestionId);
+      const sid = resolveSuggestionId(plan, input);
+      if (!sid) return { result: "Suggestion not found: provide suggestionId or displayNum (#n in Suggestions)." };
       const sug = plan.suggestions.find((s) => s.id === sid);
       if (!sug) return { result: "Suggestion not found." };
       if (sug.promoted) return { result: "Already in working plan.", plan };
@@ -422,8 +486,27 @@ async function executeTool(
       return { result: `Promoted: ${sug.title}`, plan };
     }
 
+    case "reorder_working_plan": {
+      const orderedIds = (input.orderedIds as string[]) ?? [];
+      plan = saveVacation({
+        ...plan,
+        workingPlan: reorderWorkingPlan(plan, orderedIds),
+      });
+      return { result: `Reordered working plan (${orderedIds.length} items).`, plan };
+    }
+
+    case "reorder_suggestions": {
+      const orderedIds = (input.orderedIds as string[]) ?? [];
+      plan = saveVacation({
+        ...plan,
+        suggestions: reorderUnpromotedSuggestions(plan, orderedIds),
+      });
+      return { result: `Reordered suggestions (${orderedIds.length} items).`, plan };
+    }
+
     case "update_working_plan_item": {
-      const itemId = String(input.itemId);
+      const itemId = resolveWorkingItemId(plan, input);
+      if (!itemId) return { result: "Item not found: provide itemId or displayNum (W#n)." };
       const updates = (input.updates as Record<string, unknown>) ?? {};
       if (!plan.workingPlan.some((w) => w.id === itemId)) {
         return { result: `Working plan item not found: ${itemId}` };
@@ -435,9 +518,8 @@ async function executeTool(
 
     case "demote_suggestion":
     case "remove_working_plan_item": {
-      const itemId = String(
-        input.suggestionId ?? input.itemId ?? ""
-      );
+      const itemId = resolveWorkingItemId(plan, input);
+      if (!itemId) return { result: "Working plan item not found: provide itemId or displayNum (W#n)." };
       const item = plan.workingPlan.find((w) => w.id === itemId);
       if (!item) return { result: `Working plan item not found: ${itemId}` };
       plan = saveVacation(

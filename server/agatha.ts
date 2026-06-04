@@ -10,6 +10,7 @@ import {
   requiredActionsFromUser,
   mutationSatisfiesAction,
 } from "./verify.js";
+import { planWithDisplayNums } from "./plan-numbers.js";
 import * as anthropic from "./llm/anthropic.js";
 import * as openai from "./llm/openai.js";
 
@@ -41,22 +42,11 @@ function planSummary(vacationId: string): string {
       status: plan.status,
       narrative: plan.narrative?.slice(0, 500),
       constraints: plan.constraints,
-      suggestions: plan.suggestions.map((s) => ({
-        id: s.id,
-        title: s.title,
-        type: s.type,
-        promoted: s.promoted,
-        description: s.description?.slice(0, 200),
-        location: s.location,
-        estimatedUsd: s.estimatedUsd,
-      })),
-      workingPlan: plan.workingPlan.map((w) => ({
-        id: w.id,
-        title: w.title,
-        type: w.type,
-        description: w.description?.slice(0, 200),
-        estimatedUsd: w.estimatedUsd,
-      })),
+      cardNumbers: {
+        working: "W#1, W#2, ... in Working plan order",
+        suggestions: "#1, #2, ... in Suggestions order (unpromoted only)",
+      },
+      ...planWithDisplayNums(plan),
       priceWatches: plan.priceWatches.map((w) => ({
         id: w.id,
         label: w.label,
