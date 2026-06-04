@@ -7,3 +7,7 @@ Agent rules:
 5. After completing a change, if there are QA tests that need to be done, please restart the app and instruct me what to do to QA test. If there are no QA tests, please let me know.
 6. If I give you instructions that are bulleted and / or numbered, please check in with me between items, or at least show me your 'to do' list and check things off as you go.
 7. commit changes after every successful QA check, and let me know that you are doing so...and give a succint by description comment to the commit. After each commit, push to remote.
+
+TECHNICAL NOTES:
+
+- USE PROMPT CACHING WITH ANTHROPIC AND OPEN AI IF POSSIBLE

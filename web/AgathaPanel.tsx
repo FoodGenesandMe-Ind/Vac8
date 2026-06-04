@@ -7,6 +7,7 @@ type Props = {
   plan: VacationPlan | null;
   onPlanUpdate: (plan: VacationPlan) => void;
   onEnsureVacation: () => Promise<string>;
+  onVacationDeleted?: () => void;
 };
 
 export function AgathaPanel({
@@ -14,6 +15,7 @@ export function AgathaPanel({
   plan,
   onPlanUpdate,
   onEnsureVacation,
+  onVacationDeleted,
 }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
@@ -85,6 +87,7 @@ export function AgathaPanel({
         setStreamBuffer(assistantText);
       },
       onPlan: (p) => onPlanUpdate(p),
+      onVacationDeleted: () => onVacationDeleted?.(),
       onDone: () => {
         setStreaming(false);
         setThinking(false);

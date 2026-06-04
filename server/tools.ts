@@ -1,10 +1,47 @@
 import { v4 as uuid } from "uuid";
 import type { VacationPlan, PlanItem, Suggestion, PriceWatch } from "../schema/plan.js";
 import { recalcTotals } from "../schema/plan.js";
-import { getVacation, saveVacation } from "./db.js";
+import { getVacation, saveVacation, deleteVacation } from "./db.js";
 import { searchWeb, buildGoogleFlightsUrl } from "./search.js";
 
 export type ToolContext = { vacationId: string };
+
+const ITEM_UPDATE_PROPERTIES = {
+  type: { type: "string", enum: ["flight", "train", "stay", "activity", "transport", "other"] },
+  title: { type: "string" },
+  description: { type: "string" },
+  location: { type: "string" },
+  estimatedUsd: { type: "number" },
+  confidence: { type: "string", enum: ["low", "medium", "high"] },
+  startDate: { type: "string" },
+  endDate: { type: "string" },
+};
+
+function applyItemPatch<T extends PlanItem>(item: T, updates: Record<string, unknown>): T {
+  const next = { ...item };
+  if (updates.type != null) next.type = updates.type as PlanItem["type"];
+  if (updates.title != null) next.title = String(updates.title);
+  if (updates.description != null) next.description = String(updates.description);
+  if (updates.location != null) next.location = String(updates.location);
+  if (updates.estimatedUsd != null) {
+    next.estimatedUsd = Number(updates.estimatedUsd);
+    next.costBasis = "model_estimate";
+  }
+  if (updates.confidence != null) next.confidence = updates.confidence as PlanItem["confidence"];
+  if (updates.startDate != null) next.startDate = String(updates.startDate);
+  if (updates.endDate != null) next.endDate = String(updates.endDate);
+  return next;
+}
+
+function syncSuggestionAndWorkingPlan(plan: VacationPlan, itemId: string, patch: Record<string, unknown>): VacationPlan {
+  const suggestions = plan.suggestions.map((s) =>
+    s.id === itemId ? applyItemPatch(s, patch) : s
+  );
+  const workingPlan = plan.workingPlan.map((w) =>
+    w.id === itemId ? applyItemPatch(w, patch) : w
+  );
+  return recalcTotals({ ...plan, suggestions, workingPlan });
+}
 
 export const TOOL_DEFINITIONS = [
   {
@@ -17,28 +54,23 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
-    name: "add_suggestions",
-    description: "Add 1-4 trip suggestions to the plan (not yet in working plan).",
+    name: "update_vacation",
+    description: "Update this vacation's title or status.",
     input_schema: {
       type: "object" as const,
       properties: {
-        items: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              type: { type: "string", enum: ["flight", "train", "stay", "activity", "transport", "other"] },
-              title: { type: "string" },
-              description: { type: "string" },
-              location: { type: "string" },
-              estimatedUsd: { type: "number" },
-              confidence: { type: "string", enum: ["low", "medium", "high"] },
-            },
-            required: ["type", "title"],
-          },
-        },
+        title: { type: "string" },
+        status: { type: "string", enum: ["draft", "active"] },
       },
-      required: ["items"],
+    },
+  },
+  {
+    name: "set_narrative",
+    description: "Save or replace the user's trip narrative and optional title.",
+    input_schema: {
+      type: "object" as const,
+      properties: { narrative: { type: "string" }, title: { type: "string" } },
+      required: ["narrative"],
     },
   },
   {
@@ -51,12 +83,110 @@ export const TOOL_DEFINITIONS = [
     },
   },
   {
+    name: "add_suggestions",
+    description: "Add 1-4 new suggestion cards (not in working plan yet).",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        items: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: { ...ITEM_UPDATE_PROPERTIES },
+            required: ["type", "title"],
+          },
+        },
+      },
+      required: ["items"],
+    },
+  },
+  {
+    name: "update_suggestion",
+    description:
+      "Edit an existing suggestion by id (title, description, airline details, costs, etc.). Works for promoted and unpromoted cards; keeps working plan in sync if promoted.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        suggestionId: { type: "string", description: "Suggestion id from plan state" },
+        updates: { type: "object", properties: { ...ITEM_UPDATE_PROPERTIES } },
+      },
+      required: ["suggestionId", "updates"],
+    },
+  },
+  {
+    name: "remove_suggestion",
+    description: "Delete a suggestion card by id. Also removes it from the working plan if promoted.",
+    input_schema: {
+      type: "object" as const,
+      properties: { suggestionId: { type: "string" } },
+      required: ["suggestionId"],
+    },
+  },
+  {
     name: "promote_suggestion",
     description: "Move a suggestion into the working plan.",
     input_schema: {
       type: "object" as const,
       properties: { suggestionId: { type: "string" } },
       required: ["suggestionId"],
+    },
+  },
+  {
+    name: "update_working_plan_item",
+    description: "Edit an item already in the working plan by id.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        itemId: { type: "string" },
+        updates: { type: "object", properties: { ...ITEM_UPDATE_PROPERTIES } },
+      },
+      required: ["itemId", "updates"],
+    },
+  },
+  {
+    name: "remove_working_plan_item",
+    description: "Remove an item from the working plan. The suggestion card stays but is unpromoted.",
+    input_schema: {
+      type: "object" as const,
+      properties: { itemId: { type: "string" } },
+      required: ["itemId"],
+    },
+  },
+  {
+    name: "add_price_watch",
+    description: "Add a fare or rate watch.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        label: { type: "string" },
+        searchQuery: { type: "string" },
+        origin: { type: "string" },
+        destination: { type: "string" },
+        cabin: { type: "string" },
+      },
+      required: ["label", "searchQuery"],
+    },
+  },
+  {
+    name: "update_price_watch",
+    description: "Edit a price watch by id.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        watchId: { type: "string" },
+        label: { type: "string" },
+        searchQuery: { type: "string" },
+      },
+      required: ["watchId"],
+    },
+  },
+  {
+    name: "remove_price_watch",
+    description: "Delete a price watch by id.",
+    input_schema: {
+      type: "object" as const,
+      properties: { watchId: { type: "string" } },
+      required: ["watchId"],
     },
   },
   {
@@ -74,27 +204,12 @@ export const TOOL_DEFINITIONS = [
     input_schema: { type: "object" as const, properties: {} },
   },
   {
-    name: "add_price_watch",
-    description: "Watch a fare or rate via periodic web search.",
+    name: "delete_vacation",
+    description: "Permanently delete this entire vacation. Only when the user explicitly asks to delete/remove the trip.",
     input_schema: {
       type: "object" as const,
-      properties: {
-        label: { type: "string" },
-        searchQuery: { type: "string" },
-        origin: { type: "string" },
-        destination: { type: "string" },
-        cabin: { type: "string" },
-      },
-      required: ["label", "searchQuery"],
-    },
-  },
-  {
-    name: "set_narrative",
-    description: "Save the user's original trip narrative (first message).",
-    input_schema: {
-      type: "object" as const,
-      properties: { narrative: { type: "string" }, title: { type: "string" } },
-      required: ["narrative"],
+      properties: { confirm: { type: "boolean", description: "Must be true" } },
+      required: ["confirm"],
     },
   },
 ];
@@ -103,7 +218,7 @@ export async function runTool(
   name: string,
   input: Record<string, unknown>,
   ctx: ToolContext
-): Promise<{ result: string; plan?: VacationPlan }> {
+): Promise<{ result: string; plan?: VacationPlan; deleted?: boolean }> {
   let plan = getVacation(ctx.vacationId);
   if (!plan) throw new Error("Vacation not found");
 
@@ -116,6 +231,14 @@ export async function runTool(
         .map((r, i) => `${i + 1}. ${r.title}\n${r.snippet}\n${r.link}`)
         .join("\n\n");
       return { result: text || "No results." };
+    }
+
+    case "update_vacation": {
+      const title = input.title != null ? String(input.title) : plan.title;
+      const status =
+        input.status != null ? (input.status as VacationPlan["status"]) : plan.status;
+      plan = saveVacation({ ...plan, title, status });
+      return { result: `Vacation updated: ${plan.title}`, plan };
     }
 
     case "add_suggestions": {
@@ -137,7 +260,34 @@ export async function runTool(
         suggestions: [...plan.suggestions, ...newSuggestions],
         status: "active",
       });
-      return { result: `Added ${newSuggestions.length} suggestions.`, plan };
+      return {
+        result: `Added ${newSuggestions.length} suggestions. ids: ${newSuggestions.map((s) => s.id).join(", ")}`,
+        plan,
+      };
+    }
+
+    case "update_suggestion": {
+      const sid = String(input.suggestionId);
+      const updates = (input.updates as Record<string, unknown>) ?? {};
+      const exists = plan.suggestions.some((s) => s.id === sid);
+      if (!exists) return { result: `Suggestion not found: ${sid}` };
+      plan = saveVacation(syncSuggestionAndWorkingPlan(plan, sid, updates));
+      const updated = plan.suggestions.find((s) => s.id === sid);
+      return { result: `Updated suggestion: ${updated?.title}`, plan };
+    }
+
+    case "remove_suggestion": {
+      const sid = String(input.suggestionId);
+      const sug = plan.suggestions.find((s) => s.id === sid);
+      if (!sug) return { result: `Suggestion not found: ${sid}` };
+      plan = saveVacation(
+        recalcTotals({
+          ...plan,
+          suggestions: plan.suggestions.filter((s) => s.id !== sid),
+          workingPlan: plan.workingPlan.filter((w) => w.id !== sid),
+        })
+      );
+      return { result: `Removed suggestion: ${sug.title}`, plan };
     }
 
     case "update_constraints": {
@@ -153,6 +303,7 @@ export async function runTool(
       const sid = String(input.suggestionId);
       const sug = plan.suggestions.find((s) => s.id === sid);
       if (!sug) return { result: "Suggestion not found." };
+      if (sug.promoted) return { result: "Already in working plan.", plan };
       const { promoted: _, ...item } = sug;
       plan = saveVacation(
         recalcTotals({
@@ -164,6 +315,33 @@ export async function runTool(
         })
       );
       return { result: `Promoted: ${sug.title}`, plan };
+    }
+
+    case "update_working_plan_item": {
+      const itemId = String(input.itemId);
+      const updates = (input.updates as Record<string, unknown>) ?? {};
+      if (!plan.workingPlan.some((w) => w.id === itemId)) {
+        return { result: `Working plan item not found: ${itemId}` };
+      }
+      plan = saveVacation(syncSuggestionAndWorkingPlan(plan, itemId, updates));
+      const updated = plan.workingPlan.find((w) => w.id === itemId);
+      return { result: `Updated working plan item: ${updated?.title}`, plan };
+    }
+
+    case "remove_working_plan_item": {
+      const itemId = String(input.itemId);
+      const item = plan.workingPlan.find((w) => w.id === itemId);
+      if (!item) return { result: `Working plan item not found: ${itemId}` };
+      plan = saveVacation(
+        recalcTotals({
+          ...plan,
+          workingPlan: plan.workingPlan.filter((w) => w.id !== itemId),
+          suggestions: plan.suggestions.map((s) =>
+            s.id === itemId ? { ...s, promoted: false } : s
+          ),
+        })
+      );
+      return { result: `Removed from working plan: ${item.title}`, plan };
     }
 
     case "set_pending_question": {
@@ -202,7 +380,33 @@ export async function runTool(
         recommendation: "neutral",
       };
       plan = saveVacation({ ...plan, priceWatches: [...plan.priceWatches, watch] });
-      return { result: `Price watch added: ${label}`, plan };
+      return { result: `Price watch added: ${label} (id ${watch.id})`, plan };
+    }
+
+    case "update_price_watch": {
+      const watchId = String(input.watchId);
+      const watches = plan.priceWatches.map((w) => {
+        if (w.id !== watchId) return w;
+        return {
+          ...w,
+          ...(input.label != null ? { label: String(input.label) } : {}),
+          ...(input.searchQuery != null ? { searchQuery: String(input.searchQuery) } : {}),
+        };
+      });
+      if (!plan.priceWatches.some((w) => w.id === watchId)) {
+        return { result: `Price watch not found: ${watchId}` };
+      }
+      plan = saveVacation({ ...plan, priceWatches: watches });
+      return { result: "Price watch updated.", plan };
+    }
+
+    case "remove_price_watch": {
+      const watchId = String(input.watchId);
+      plan = saveVacation({
+        ...plan,
+        priceWatches: plan.priceWatches.filter((w) => w.id !== watchId),
+      });
+      return { result: "Price watch removed.", plan };
     }
 
     case "set_narrative": {
@@ -210,6 +414,14 @@ export async function runTool(
       const title = input.title ? String(input.title) : plan.title;
       plan = saveVacation({ ...plan, narrative, title, status: "active" });
       return { result: "Narrative saved.", plan };
+    }
+
+    case "delete_vacation": {
+      if (input.confirm !== true) {
+        return { result: "Delete cancelled: confirm must be true." };
+      }
+      deleteVacation(ctx.vacationId);
+      return { result: "Vacation deleted.", deleted: true };
     }
 
     default:

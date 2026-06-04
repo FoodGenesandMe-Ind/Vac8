@@ -91,6 +91,11 @@ export default function App() {
         plan={plan}
         onPlanUpdate={handlePlanUpdate}
         onEnsureVacation={ensureVacation}
+        onVacationDeleted={async () => {
+          setSelectedId(null);
+          setPlan(null);
+          await refreshList();
+        }}
       />
       </div>
     </div>

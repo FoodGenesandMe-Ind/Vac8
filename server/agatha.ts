@@ -27,14 +27,34 @@ function planSummary(vacationId: string): string {
   if (!plan) return "No plan.";
   return JSON.stringify(
     {
+      vacationId: plan.id,
       title: plan.title,
+      status: plan.status,
       narrative: plan.narrative?.slice(0, 500),
       constraints: plan.constraints,
-      workingPlanCount: plan.workingPlan.length,
-      suggestions: plan.suggestions.filter((s) => !s.promoted).map((s) => ({ id: s.id, title: s.title })),
+      suggestions: plan.suggestions.map((s) => ({
+        id: s.id,
+        title: s.title,
+        type: s.type,
+        promoted: s.promoted,
+        description: s.description?.slice(0, 200),
+        location: s.location,
+        estimatedUsd: s.estimatedUsd,
+      })),
+      workingPlan: plan.workingPlan.map((w) => ({
+        id: w.id,
+        title: w.title,
+        type: w.type,
+        description: w.description?.slice(0, 200),
+        estimatedUsd: w.estimatedUsd,
+      })),
+      priceWatches: plan.priceWatches.map((w) => ({
+        id: w.id,
+        label: w.label,
+        recommendation: w.recommendation,
+      })),
       pendingQuestion: plan.agathaState.pendingQuestion,
       totals: plan.totals,
-      priceWatches: plan.priceWatches.length,
     },
     null,
     2
@@ -62,6 +82,11 @@ async function runTools(
     send("tool", { name: tc.name, status: "running" });
     try {
       const out = await runTool(tc.name, tc.input, ctx);
+      if (out.deleted) {
+        send("vacation_deleted", { vacationId: ctx.vacationId });
+        toolResults.push({ toolUseId: tc.id, name: tc.name, result: out.result });
+        continue;
+      }
       if (out.plan) send("plan_updated", { plan: out.plan });
       toolResults.push({ toolUseId: tc.id, name: tc.name, result: out.result });
       send("tool", { name: tc.name, status: "done", result: out.result.slice(0, 200) });

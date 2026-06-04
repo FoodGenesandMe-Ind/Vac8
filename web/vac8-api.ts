@@ -54,6 +54,7 @@ export function streamChat(
   handlers: {
     onText?: (chunk: string) => void;
     onPlan?: (plan: VacationPlan) => void;
+    onVacationDeleted?: (vacationId: string) => void;
     onTool?: (data: { name: string; status: string }) => void;
     onStatus?: (data: { phase: string; message?: string; tool?: string }) => void;
     onDone?: () => void;
@@ -98,6 +99,7 @@ export function streamChat(
           const parsed = JSON.parse(data);
           if (event === "text") handlers.onText?.(parsed.chunk);
           if (event === "plan_updated") handlers.onPlan?.(parsed.plan);
+          if (event === "vacation_deleted") handlers.onVacationDeleted?.(parsed.vacationId);
           if (event === "tool") handlers.onTool?.(parsed);
           if (event === "status") handlers.onStatus?.(parsed);
           if (event === "error") handlers.onError?.(parsed.message);
