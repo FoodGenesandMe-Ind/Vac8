@@ -1,5 +1,5 @@
 import type { VacationPlan } from "./types";
-import { promoteSuggestion } from "./vac8-api";
+import { demoteSuggestion, promoteSuggestion } from "./vac8-api";
 
 type Props = {
   plan: VacationPlan | null;
@@ -24,6 +24,11 @@ export function PlanDashboard({ plan, onPromote }: Props) {
 
   const handlePromote = async (suggestionId: string) => {
     const updated = await promoteSuggestion(plan.id, suggestionId);
+    onPromote(updated);
+  };
+
+  const handleDemote = async (suggestionId: string) => {
+    const updated = await demoteSuggestion(plan.id, suggestionId);
     onPromote(updated);
   };
 
@@ -56,9 +61,18 @@ export function PlanDashboard({ plan, onPromote }: Props) {
                   key={item.id}
                   className="p-3 rounded bg-surface border border-border text-sm"
                 >
-                  <div className="flex justify-between gap-2">
-                    <span className="font-medium">{item.title}</span>
-                    <span className="text-muted shrink-0">{formatUsd(item.estimatedUsd)}</span>
+                  <div className="flex justify-between items-start gap-2">
+                    <div className="min-w-0">
+                      <span className="font-medium">{item.title}</span>
+                      <span className="text-muted shrink-0 ml-2">{formatUsd(item.estimatedUsd)}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => handleDemote(item.id)}
+                      className="shrink-0 px-2 py-1 text-xs rounded border border-border text-muted hover:text-gray-200 hover:bg-panel"
+                    >
+                      Demote
+                    </button>
                   </div>
                   {item.description && (
                     <p className="text-muted mt-1 text-xs">{item.description}</p>

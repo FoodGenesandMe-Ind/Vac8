@@ -69,6 +69,13 @@ app.post("/api/vacations/:id/promote", async (c) => {
   return c.json(out.plan);
 });
 
+app.post("/api/vacations/:id/demote", async (c) => {
+  const { suggestionId } = await c.req.json();
+  const out = await runTool("demote_suggestion", { suggestionId }, { vacationId: c.req.param("id") });
+  if (!out.plan) return c.json({ error: out.result }, 400);
+  return c.json(out.plan);
+});
+
 app.get("/api/vacations/:id/messages", (c) => {
   return c.json(listMessages(c.req.param("id")));
 });

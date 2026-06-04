@@ -124,11 +124,62 @@ export const TOOL_DEFINITIONS = [
   },
   {
     name: "promote_suggestion",
-    description: "Move a suggestion into the working plan.",
+    description: "Promote a suggestion into the working plan (Suggestions -> Working plan).",
     input_schema: {
       type: "object" as const,
       properties: { suggestionId: { type: "string" } },
       required: ["suggestionId"],
+    },
+  },
+  {
+    name: "demote_suggestion",
+    description:
+      "Demote a suggestion from the working plan back to Suggestions (unpromoted). Use suggestionId (same as item id).",
+    input_schema: {
+      type: "object" as const,
+      properties: { suggestionId: { type: "string" } },
+      required: ["suggestionId"],
+    },
+  },
+  {
+    name: "read_plan_from_db",
+    description:
+      "Re-read the vacation plan fresh from the database. Use for self-check after mutations — do not trust memory.",
+    input_schema: { type: "object" as const, properties: {} },
+  },
+  {
+    name: "verify_plan",
+    description:
+      "Self-test: verify the database matches expectations after a change. Call before telling the user a change succeeded.",
+    input_schema: {
+      type: "object" as const,
+      properties: {
+        checks: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              kind: {
+                type: "string",
+                enum: [
+                  "suggestion_field",
+                  "suggestion_promoted",
+                  "in_working_plan",
+                  "suggestion_exists",
+                ],
+              },
+              suggestionId: { type: "string" },
+              itemId: { type: "string" },
+              field: { type: "string" },
+              expected: {},
+              promoted: { type: "boolean" },
+              present: { type: "boolean" },
+            },
+            required: ["kind"],
+          },
+        },
+      },
+      required: ["checks"],
     },
   },
   {
@@ -328,8 +379,11 @@ export async function runTool(
       return { result: `Updated working plan item: ${updated?.title}`, plan };
     }
 
+    case "demote_suggestion":
     case "remove_working_plan_item": {
-      const itemId = String(input.itemId);
+      const itemId = String(
+        input.suggestionId ?? input.itemId ?? ""
+      );
       const item = plan.workingPlan.find((w) => w.id === itemId);
       if (!item) return { result: `Working plan item not found: ${itemId}` };
       plan = saveVacation(
@@ -341,7 +395,105 @@ export async function runTool(
           ),
         })
       );
-      return { result: `Removed from working plan: ${item.title}`, plan };
+      return { result: `Demoted to suggestions: ${item.title}`, plan };
+    }
+
+    case "read_plan_from_db": {
+      const fresh = getVacation(ctx.vacationId);
+      if (!fresh) return { result: "Vacation not found in database." };
+      return {
+        result: JSON.stringify(
+          {
+            vacationId: fresh.id,
+            title: fresh.title,
+            suggestions: fresh.suggestions,
+            workingPlan: fresh.workingPlan,
+            totals: fresh.totals,
+          },
+          null,
+          2
+        ),
+        plan: fresh,
+      };
+    }
+
+    case "verify_plan": {
+      const fresh = getVacation(ctx.vacationId);
+      if (!fresh) return { result: "Vacation not found in database." };
+
+      const checks = (input.checks as Record<string, unknown>[]) ?? [];
+      const results: { kind: string; ok: boolean; detail: string }[] = [];
+
+      for (const check of checks) {
+        const kind = String(check.kind ?? "");
+        const sid = check.suggestionId != null ? String(check.suggestionId) : "";
+        const iid = check.itemId != null ? String(check.itemId) : sid;
+        const sug = fresh.suggestions.find((s) => s.id === sid);
+        const inWorking = fresh.workingPlan.some((w) => w.id === iid);
+
+        if (kind === "suggestion_exists") {
+          const ok = !!sug;
+          results.push({
+            kind,
+            ok,
+            detail: ok ? `Suggestion ${sid} exists` : `Suggestion ${sid} missing`,
+          });
+          continue;
+        }
+
+        if (kind === "suggestion_promoted") {
+          const want = check.promoted === true;
+          const ok = !!sug && sug.promoted === want;
+          results.push({
+            kind,
+            ok,
+            detail: ok
+              ? `promoted=${want} as expected`
+              : `expected promoted=${want}, got ${sug?.promoted ?? "missing"}`,
+          });
+          continue;
+        }
+
+        if (kind === "in_working_plan") {
+          const want = check.present !== false;
+          const ok = want ? inWorking : !inWorking;
+          results.push({
+            kind,
+            ok,
+            detail: ok
+              ? `working plan presence=${want} as expected`
+              : `expected in working plan=${want}, got ${inWorking}`,
+          });
+          continue;
+        }
+
+        if (kind === "suggestion_field") {
+          const field = String(check.field ?? "");
+          const expected = check.expected;
+          const actual = sug ? (sug as Record<string, unknown>)[field] : undefined;
+          const ok =
+            sug != null &&
+            (typeof expected === "string"
+              ? String(actual ?? "").includes(expected)
+              : actual === expected);
+          results.push({
+            kind,
+            ok,
+            detail: ok
+              ? `${field} verified`
+              : `expected ${field}=${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
+          });
+          continue;
+        }
+
+        results.push({ kind, ok: false, detail: `Unknown check kind: ${kind}` });
+      }
+
+      const allOk = results.every((r) => r.ok);
+      return {
+        result: JSON.stringify({ verified: allOk, results }, null, 2),
+        plan: fresh,
+      };
     }
 
     case "set_pending_question": {

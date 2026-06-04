@@ -41,6 +41,18 @@ export async function promoteSuggestion(
   return parseJson(res);
 }
 
+export async function demoteSuggestion(
+  vacationId: string,
+  suggestionId: string
+): Promise<VacationPlan> {
+  const res = await fetch(`${BASE}/vacations/${vacationId}/demote`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ suggestionId }),
+  });
+  return parseJson(res);
+}
+
 export type ChatMessage = { id: string; role: string; content: string; createdAt: string };
 
 export async function fetchMessages(vacationId: string): Promise<ChatMessage[]> {
