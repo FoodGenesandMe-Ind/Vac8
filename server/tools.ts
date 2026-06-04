@@ -3,6 +3,60 @@ import type { VacationPlan, PlanItem, Suggestion, PriceWatch } from "../schema/p
 import { recalcTotals } from "../schema/plan.js";
 import { getVacation, saveVacation, deleteVacation } from "./db.js";
 import { searchWeb, buildGoogleFlightsUrl } from "./search.js";
+import {
+  MUTATION_TOOLS,
+  runVerification,
+  checksForMutation,
+  verifyRemoveSuggestion,
+  verifyAddedSuggestions,
+  type PlanCheck,
+} from "./verify.js";
+
+export type ToolOutput = {
+  result: string;
+  plan?: VacationPlan;
+  deleted?: boolean;
+  verified?: boolean;
+};
+
+function applyAutoVerify(
+  ctx: ToolContext,
+  toolName: string,
+  input: Record<string, unknown>,
+  out: ToolOutput
+): ToolOutput {
+  let verification = { verified: true, summary: "ok", plan: out.plan ?? getVacation(ctx.vacationId) };
+
+  if (toolName === "remove_suggestion") {
+    verification = verifyRemoveSuggestion(ctx.vacationId, String(input.suggestionId ?? ""));
+  } else if (toolName === "add_suggestions") {
+    const items = (input.items as { title?: string }[]) ?? [];
+    verification = verifyAddedSuggestions(
+      ctx.vacationId,
+      items.map((i) => i.title ?? "").filter(Boolean)
+    );
+  } else {
+    const checks = checksForMutation(toolName, input);
+    if (checks.length > 0) {
+      verification = runVerification(ctx.vacationId, checks);
+    }
+  }
+
+  if (!verification.verified) {
+    return {
+      result: `VERIFICATION_FAILED: ${toolName} was not confirmed in the database. ${verification.summary}. You must NOT tell the user this succeeded. Call the tool again or fix the issue, then wait for [verified in database].`,
+      plan: verification.plan ?? out.plan,
+      verified: false,
+    };
+  }
+
+  return {
+    ...out,
+    result: `${out.result} [verified in database]`,
+    plan: verification.plan ?? out.plan,
+    verified: true,
+  };
+}
 
 export type ToolContext = { vacationId: string };
 
@@ -265,11 +319,11 @@ export const TOOL_DEFINITIONS = [
   },
 ];
 
-export async function runTool(
+async function executeTool(
   name: string,
   input: Record<string, unknown>,
   ctx: ToolContext
-): Promise<{ result: string; plan?: VacationPlan; deleted?: boolean }> {
+): Promise<ToolOutput> {
   let plan = getVacation(ctx.vacationId);
   if (!plan) throw new Error("Vacation not found");
 
@@ -418,81 +472,12 @@ export async function runTool(
     }
 
     case "verify_plan": {
-      const fresh = getVacation(ctx.vacationId);
-      if (!fresh) return { result: "Vacation not found in database." };
-
-      const checks = (input.checks as Record<string, unknown>[]) ?? [];
-      const results: { kind: string; ok: boolean; detail: string }[] = [];
-
-      for (const check of checks) {
-        const kind = String(check.kind ?? "");
-        const sid = check.suggestionId != null ? String(check.suggestionId) : "";
-        const iid = check.itemId != null ? String(check.itemId) : sid;
-        const sug = fresh.suggestions.find((s) => s.id === sid);
-        const inWorking = fresh.workingPlan.some((w) => w.id === iid);
-
-        if (kind === "suggestion_exists") {
-          const ok = !!sug;
-          results.push({
-            kind,
-            ok,
-            detail: ok ? `Suggestion ${sid} exists` : `Suggestion ${sid} missing`,
-          });
-          continue;
-        }
-
-        if (kind === "suggestion_promoted") {
-          const want = check.promoted === true;
-          const ok = !!sug && sug.promoted === want;
-          results.push({
-            kind,
-            ok,
-            detail: ok
-              ? `promoted=${want} as expected`
-              : `expected promoted=${want}, got ${sug?.promoted ?? "missing"}`,
-          });
-          continue;
-        }
-
-        if (kind === "in_working_plan") {
-          const want = check.present !== false;
-          const ok = want ? inWorking : !inWorking;
-          results.push({
-            kind,
-            ok,
-            detail: ok
-              ? `working plan presence=${want} as expected`
-              : `expected in working plan=${want}, got ${inWorking}`,
-          });
-          continue;
-        }
-
-        if (kind === "suggestion_field") {
-          const field = String(check.field ?? "");
-          const expected = check.expected;
-          const actual = sug ? (sug as Record<string, unknown>)[field] : undefined;
-          const ok =
-            sug != null &&
-            (typeof expected === "string"
-              ? String(actual ?? "").includes(expected)
-              : actual === expected);
-          results.push({
-            kind,
-            ok,
-            detail: ok
-              ? `${field} verified`
-              : `expected ${field}=${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`,
-          });
-          continue;
-        }
-
-        results.push({ kind, ok: false, detail: `Unknown check kind: ${kind}` });
-      }
-
-      const allOk = results.every((r) => r.ok);
+      const checks = (input.checks as PlanCheck[]) ?? [];
+      const v = runVerification(ctx.vacationId, checks);
       return {
-        result: JSON.stringify({ verified: allOk, results }, null, 2),
-        plan: fresh,
+        result: JSON.stringify({ verified: v.verified, results: v.results }, null, 2),
+        plan: v.plan ?? undefined,
+        verified: v.verified,
       };
     }
 
@@ -579,4 +564,16 @@ export async function runTool(
     default:
       return { result: `Unknown tool: ${name}` };
   }
+}
+
+export async function runTool(
+  name: string,
+  input: Record<string, unknown>,
+  ctx: ToolContext
+): Promise<ToolOutput> {
+  const out = await executeTool(name, input, ctx);
+  if (MUTATION_TOOLS.has(name) && !out.deleted) {
+    return applyAutoVerify(ctx, name, input, out);
+  }
+  return { ...out, verified: out.verified ?? true };
 }
