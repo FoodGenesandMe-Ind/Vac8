@@ -18,3 +18,19 @@ body {
 * {
   box-sizing: border-box;
 }
+
+.thinking-dots {
+  display: inline-block;
+  letter-spacing: 0.15em;
+  animation: thinking-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes thinking-pulse {
+  0%,
+  100% {
+    opacity: 0.35;
+  }
+  50% {
+    opacity: 1;
+  }
+}

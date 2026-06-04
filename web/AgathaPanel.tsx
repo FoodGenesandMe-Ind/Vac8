@@ -19,6 +19,9 @@ export function AgathaPanel({
   const [input, setInput] = useState("");
   const [streaming, setStreaming] = useState(false);
   const [streamBuffer, setStreamBuffer] = useState("");
+  const [thinking, setThinking] = useState(false);
+  const [slowMessage, setSlowMessage] = useState<string | null>(null);
+  const [activeTool, setActiveTool] = useState<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -31,7 +34,7 @@ export function AgathaPanel({
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, streamBuffer]);
+  }, [messages, streamBuffer, thinking, slowMessage]);
 
   const greeting =
     messages.length === 0
@@ -46,6 +49,9 @@ export function AgathaPanel({
     setInput("");
     setStreaming(true);
     setStreamBuffer("");
+    setThinking(true);
+    setSlowMessage(null);
+    setActiveTool(null);
 
     const userMsg: ChatMessage = {
       id: `local-${Date.now()}`,
@@ -58,13 +64,32 @@ export function AgathaPanel({
     let assistantText = "";
 
     streamChat(vid, text, {
+      onStatus: (data) => {
+        if (data.phase === "thinking") {
+          setThinking(true);
+          setActiveTool(null);
+        }
+        if (data.phase === "tool") {
+          setThinking(true);
+          setActiveTool(data.tool ?? null);
+        }
+        if (data.phase === "slow" && data.message) {
+          setSlowMessage(data.message);
+        }
+      },
       onText: (chunk) => {
+        setThinking(false);
+        setSlowMessage(null);
+        setActiveTool(null);
         assistantText += chunk;
         setStreamBuffer(assistantText);
       },
       onPlan: (p) => onPlanUpdate(p),
       onDone: () => {
         setStreaming(false);
+        setThinking(false);
+        setSlowMessage(null);
+        setActiveTool(null);
         if (assistantText) {
           setMessages((m) => [
             ...m,
@@ -81,6 +106,9 @@ export function AgathaPanel({
       },
       onError: (msg) => {
         setStreaming(false);
+        setThinking(false);
+        setSlowMessage(null);
+        setActiveTool(null);
         setMessages((m) => [
           ...m,
           {
@@ -94,6 +122,8 @@ export function AgathaPanel({
       },
     });
   };
+
+  const showThinking = streaming && thinking && !streamBuffer;
 
   return (
     <aside className="w-96 shrink-0 flex flex-col bg-surface">
@@ -130,6 +160,21 @@ export function AgathaPanel({
         {streamBuffer && (
           <div className="bg-panel border border-border p-2 rounded whitespace-pre-wrap">
             {streamBuffer}
+          </div>
+        )}
+        {showThinking && (
+          <div className="text-left">
+            <div className="inline-block bg-panel border border-border p-2 rounded text-muted">
+              <span className="thinking-dots">...</span>
+              {activeTool && (
+                <span className="block text-xs mt-1 text-muted/80">
+                  {activeTool.replace(/_/g, " ")}
+                </span>
+              )}
+            </div>
+            {slowMessage && (
+              <p className="text-xs text-muted mt-2 italic">{slowMessage}</p>
+            )}
           </div>
         )}
         <div ref={bottomRef} />
