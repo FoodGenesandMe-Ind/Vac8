@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n web,api -c blue,green \"vite\" \"tsx watch server/index.ts\"",
+    "dev:stop": "sh scripts/stop-dev.sh",
+    "dev:restart": "npm run dev:stop && npm run dev",
     "build": "tsc -p tsconfig.server.json && vite build",
     "start": "NODE_ENV=production tsx server/index.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.server.json --noEmit",

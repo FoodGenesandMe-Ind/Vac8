@@ -12,6 +12,14 @@ npm run test:keys   # verify all keys
 npm run dev
 ```
 
+If ports are stuck (`EADDRINUSE` on 3847 or Vite picks 5174+):
+```bash
+npm run dev:stop
+npm run dev
+```
+
+Open the URL Vite prints (usually http://localhost:5173).
+
 Uses `npm` (not `pnpm`). Install pnpm only if you prefer it: `npm install -g pnpm`.
 
 Open http://localhost:5173
